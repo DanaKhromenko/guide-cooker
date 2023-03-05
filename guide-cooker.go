@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -31,6 +34,10 @@ var gGuideCellsTableName *string
 var gDeletedGuideCellsTableName *string
 
 // START: Functions mocked in tests.
+
+var gLoadAwsConfigFn = func(ctx context.Context) (aws.Config, error) {
+	return config.LoadDefaultConfig(ctx)
+}
 
 var gGetCurrentTimeInSecondsFn = func() int64 {
 	return time.Now().Unix()
@@ -99,6 +106,35 @@ type ProcessingResult struct {
 }
 
 func coldStart() error {
+	gCtx = context.Background()
+
+	awsConfig, err := gLoadAwsConfigFn(gCtx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %v", err)
+	}
+	gDynamodbClient = dynamodb.NewFromConfig(awsConfig)
+
+	gGuideCellsTableName, err = getRequiredEnvVar("GUIDE_CELLS_TABLE_NAME")
+	if err != nil {
+		return err
+	}
+
+	gDeletedGuideCellsTableName, err = getRequiredEnvVar("DELETED_GUIDE_CELLS_TABLE_NAME")
+	if err != nil {
+		return err
+	}
+
+	guideCellTtlInDaysAfterEndTime, err := getRequiredIntEnvVar("GUIDE_CELL_TTL_IN_DAYS_AFTER_END_TIME")
+	if err != nil {
+		return err
+	}
+	gGuideCellTtlInSecondsAfterEndTime = int64(guideCellTtlInDaysAfterEndTime) * 24 * 60 * 60
+
+	gMaxNumberOfWorkers, err = getRequiredIntEnvVar("MAX_NUMBER_OF_WORKERS")
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -266,6 +302,22 @@ func newDynamodbProcessingResult(err error) ProcessingResult {
 	} else {
 		return ProcessingResult{Status: FAILED, Details: err.Error()}
 	}
+}
+
+func getRequiredEnvVar(name string) (*string, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return nil, fmt.Errorf("missing required environment variable '%v'", name)
+	}
+	return &value, nil
+}
+
+func getRequiredIntEnvVar(name string) (int, error) {
+	value, err := getRequiredEnvVar(name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(*value)
 }
 
 // Returns: map<ChannelId, GuideCellKafkaMessage[]> and the number of skipped (invalid) Kafka messages.
