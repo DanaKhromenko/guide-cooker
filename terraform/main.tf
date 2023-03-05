@@ -5,7 +5,7 @@ locals {
 
   tags = {
     Feature = "Guide"
-    Info    = "Cloud Core Upgrade"
+    Info    = "Guide Upgrade"
     Owner   = var.owner
     Env     = local.namespace
     TTL     = "AlwaysOn"
