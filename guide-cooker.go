@@ -8,16 +8,33 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"golang.org/x/exp/maps"
 )
 
+// These variables must be constants but, unfortunately, Golang does not support this.
+var gConditionalCheckFailedException *types.ConditionalCheckFailedException
+var gPublicationIdAttributeName = expression.Name("UdfPublicationId")
+
+var gCtx context.Context
+var gDynamodbClient DynamodbClient
+var gGuideCellTtlInSecondsAfterEndTime int64
 var gMaxNumberOfWorkers int
+var gGuideCellsTableName *string
+var gDeletedGuideCellsTableName *string
 
 // START: Functions mocked in tests.
+
+var gGetCurrentTimeInSecondsFn = func() int64 {
+	return time.Now().Unix()
+}
 
 var gPrintlnFn = func(msg string) {
 	fmt.Println(msg)
@@ -36,8 +53,9 @@ type GuideCellKey struct {
 
 type BaseGuideCellFields struct {
 	GuideCellKey
-	ShowId    string
-	StartTime int64
+	ShowId        string
+	StartTime     int64
+	PublicationId int64
 }
 
 type GuideCellKafkaMessage struct {
@@ -118,7 +136,57 @@ func decodeBase64String(encodedValue string) (string, error) {
 }
 
 func processKafkaMessage(kafkaMessage *GuideCellKafkaMessage) ProcessingResult {
-	return ProcessingResult{}
+	expirationDate := kafkaMessage.EndTime + gGuideCellTtlInSecondsAfterEndTime
+	if expirationDate <= gGetCurrentTimeInSecondsFn() {
+		return newSkippedProcessingResult("expired")
+	}
+
+	baseGuideCellDbItem := BaseGuideCellDbItem{
+		BaseGuideCellFields:  kafkaMessage.BaseGuideCellFields,
+		ExpirationDate:       expirationDate,
+		KafkaPartitionOffset: fmt.Sprintf("%d:%d", kafkaMessage.Partition, kafkaMessage.Offset),
+	}
+
+	var putItemTable, deleteItemTable *string
+	var item interface{}
+	if kafkaMessage.GuideCell == "" {
+		putItemTable, deleteItemTable = gDeletedGuideCellsTableName, gGuideCellsTableName
+		item = &DeletedGuideCellDbItem{BaseGuideCellDbItem: baseGuideCellDbItem}
+	} else {
+		putItemTable, deleteItemTable = gGuideCellsTableName, gDeletedGuideCellsTableName
+		item = &GuideCellDbItem{BaseGuideCellDbItem: baseGuideCellDbItem, GuideCell: kafkaMessage.GuideCell}
+	}
+
+	// Note: no error is expected here.
+	expr, _ := expression.NewBuilder().WithCondition(expression.Or(
+		gPublicationIdAttributeName.AttributeNotExists(),
+		gPublicationIdAttributeName.LessThan(expression.Value(kafkaMessage.PublicationId)),
+	)).Build()
+
+	// Note: no error is expected here.
+	putItemAttributeValue, _ := attributevalue.MarshalMap(item)
+	putItem := types.TransactWriteItem{Put: &types.Put{
+		TableName:                 putItemTable,
+		ConditionExpression:       expr.Condition(),
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		Item:                      putItemAttributeValue,
+	}}
+
+	// Note: no error is expected here
+	deleteItemKeyAttributeValue, _ := attributevalue.MarshalMap(kafkaMessage.GuideCellKey)
+	deleteItem := types.TransactWriteItem{Delete: &types.Delete{
+		TableName:                 deleteItemTable,
+		ConditionExpression:       expr.Condition(),
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		Key:                       deleteItemKeyAttributeValue,
+	}}
+
+	_, err := gDynamodbClient.TransactWriteItems(gCtx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{putItem, deleteItem}})
+
+	return newDynamodbProcessingResult(err)
 }
 
 func parseKafkaRecord(kafkaRecord *events.KafkaRecord) (*GuideCellKafkaMessage, error) {
@@ -144,6 +212,11 @@ func parseKafkaRecord(kafkaRecord *events.KafkaRecord) (*GuideCellKafkaMessage, 
 		ChannelId: channelId,
 		EndTime:   endTime,
 	}}
+
+	guideKafkaMessage.PublicationId, convertErr = getRequiredInt64KafkaRecordHeader(headers, "PublicationId")
+	if convertErr != nil {
+		return nil, convertErr
+	}
 
 	guideKafkaMessage.StartTime, convertErr = getRequiredInt64KafkaRecordHeader(headers, "StartTime")
 	if convertErr != nil {
@@ -178,6 +251,21 @@ func newSkippedProcessingResult(details string) ProcessingResult {
 
 func newSkippedProcessingResultWithError(err error) ProcessingResult {
 	return newSkippedProcessingResult(err.Error())
+}
+
+func newDynamodbProcessingResult(err error) ProcessingResult {
+	if err == nil {
+		return ProcessingResult{Status: STORED}
+	}
+
+	// Note: errors.Is() requires argument of type error, whereas errors.As() takes target as Any.
+	// For some reason compiler does not complain to dynamodb.ConditionalCheckFailedException type for Is() method
+	// but it does not works as expected. So, kept As() for now.
+	if errors.As(err, &gConditionalCheckFailedException) {
+		return newSkippedProcessingResult("outdated")
+	} else {
+		return ProcessingResult{Status: FAILED, Details: err.Error()}
+	}
 }
 
 // Returns: map<ChannelId, GuideCellKafkaMessage[]> and the number of skipped (invalid) Kafka messages.
