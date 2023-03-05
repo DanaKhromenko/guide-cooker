@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	TOPIC        string = "<DC>.<UDF_ENV>.udf.cloudcore-guide-cells"
+	TOPIC        string = "<TestDataCenter>.<TestEnvironment>.guide-cells"
 	RECORD_KEY   string = "TestRecordKey"
 	RECORD_VALUE string = "TestRecordValue"
 	OFFSET       int64  = 1
