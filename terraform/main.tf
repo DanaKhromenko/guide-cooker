@@ -58,11 +58,11 @@ resource "aws_dynamodb_table" "guide_cells_dynamodb_table" {
 }
 
 resource "aws_dynamodb_table" "deleted_guide_cells_dynamodb_table" {
-  name             = "${local.namespace}-deleted-guide-cells"
-  billing_mode     = "PAY_PER_REQUEST"
-  tags             = local.tags
-  hash_key         = "StationId"
-  range_key        = "EndTime"
+  name         = "${local.namespace}-deleted-guide-cells"
+  billing_mode = "PAY_PER_REQUEST"
+  tags         = local.tags
+  hash_key     = "StationId"
+  range_key    = "EndTime"
 
   attribute {
     name = "StationId"
@@ -149,7 +149,7 @@ resource "aws_iam_role" "lambda_role" {
             aws_dynamodb_table.guide_cells_dynamodb_table.arn,
             aws_dynamodb_table.deleted_guide_cells_dynamodb_table.arn
           ],
-          Effect   = "Allow"
+          Effect = "Allow"
         }
       ]
     })
@@ -169,8 +169,8 @@ resource "aws_lambda_function" "lambda" {
 
   environment {
     variables = {
-      GUIDE_CELLS_TABLE_NAME                = aws_dynamodb_table.guide_cells_dynamodb_table.name
-      DELETED_GUIDE_CELLS_TABLE_NAME        = aws_dynamodb_table.deleted_guide_cells_dynamodb_table.name
+      GUIDE_CELLS_TABLE_NAME         = aws_dynamodb_table.guide_cells_dynamodb_table.name
+      DELETED_GUIDE_CELLS_TABLE_NAME = aws_dynamodb_table.deleted_guide_cells_dynamodb_table.name
     }
   }
 }

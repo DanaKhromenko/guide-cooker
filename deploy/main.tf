@@ -26,11 +26,11 @@ data "terraform_remote_state" "shared" {
 }
 
 module "guide-cooker" {
-  source         = "../terraform"
-  instance_name  = var.instance_name
-  owner          = var.owner
-  function_file  = "../guide-cooker.zip"
-  kafka_endpoint = "kafka.test.com:1234"
+  source                      = "../terraform"
+  instance_name               = var.instance_name
+  owner                       = var.owner
+  function_file               = "../guide-cooker.zip"
+  kafka_endpoint              = "kafka.test.com:1234"
   guide_cells_kafka_topic     = test_dynconfig_topic.guide_cells_kafka_topic.name
   vpc_subnets                 = data.terraform_remote_state.shared.outputs.internal-vpc-subnets-us-east-1
   vpc_security_group          = data.terraform_remote_state.shared.outputs.internal-vpc-security-group-id-us-east-1
