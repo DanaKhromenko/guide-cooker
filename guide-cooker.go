@@ -5,11 +5,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"golang.org/x/exp/maps"
 )
+
+var gMaxNumberOfWorkers int
 
 // START: Functions mocked in tests.
 
@@ -111,6 +116,10 @@ func decodeBase64String(encodedValue string) (string, error) {
 	return string(bytes), nil
 }
 
+func processKafkaMessage(kafkaMessage *GuideCellKafkaMessage) ProcessingResult {
+	return ProcessingResult{}
+}
+
 func parseKafkaRecord(kafkaRecord *events.KafkaRecord) (*GuideCellKafkaMessage, error) {
 	headers := parseKafkaRecordHeaders(kafkaRecord.Headers)
 
@@ -194,8 +203,55 @@ func getGuideCellKafkaMessages(kafkaEvent *events.KafkaEvent) (map[string][]Guid
 func handleKafkaEvent(kafkaEvent *events.KafkaEvent) error {
 	guideCellKafkaMessageMap, skippedKafkaRecordCount := getGuideCellKafkaMessages(kafkaEvent)
 
-	gPrintlnFn(fmt.Sprintf("guideCellKafkaMessageMap=%v", guideCellKafkaMessageMap))
-	gPrintlnFn(fmt.Sprintf("skippedKafkaRecordCount=%v", skippedKafkaRecordCount))
+	channelIdSlice := maps.Keys(guideCellKafkaMessageMap)
+
+	var storedKafkaRecordCount int32 = 0
+	var failedKafkaRecordCount int32 = 0
+	statusCountMap := map[ProcessingStatus]*int32{
+		STORED:  &storedKafkaRecordCount,
+		SKIPPED: &skippedKafkaRecordCount,
+		FAILED:  &failedKafkaRecordCount,
+	}
+
+	// Note: we need as many workers as the number of ChannelIds to be processed
+	// but not more than configured for the lambda.
+	goRoutineCount := len(channelIdSlice)
+	if goRoutineCount > gMaxNumberOfWorkers {
+		goRoutineCount = gMaxNumberOfWorkers
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(goRoutineCount)
+
+	var channelIdIndexGlobal int32 = -1
+	for i := 0; i < goRoutineCount; i++ {
+		go func() {
+			for {
+				channelIdIndexToProcess := atomic.AddInt32(&channelIdIndexGlobal, 1)
+				if channelIdIndexToProcess >= int32(len(channelIdSlice)) {
+					break
+				}
+
+				channelId := channelIdSlice[channelIdIndexToProcess]
+				for _, guideCellKafkaMessage := range guideCellKafkaMessageMap[channelId] {
+					kafkaMessage := guideCellKafkaMessage
+					processingResult := processKafkaMessage(&kafkaMessage)
+
+					logProcessingResult(processingResult, kafkaMessage.Topic, kafkaMessage.Partition, kafkaMessage.Offset)
+
+					statusCount := statusCountMap[processingResult.Status]
+					atomic.AddInt32(statusCount, 1)
+
+					// All Kafka messages associated with a station must be process sequentially to guarantee data
+					// consistency. This means that processing for a station must be stopped at the 1st error.
+					if processingResult.Status == FAILED {
+						break
+					}
+				}
+			}
+			wg.Done()
+		}()
+	}
 
 	return nil
 }

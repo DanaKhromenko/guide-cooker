@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.38.0
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.18.6
 	github.com/stretchr/testify v1.7.2
+	golang.org/x/exp v0.0.0-20230304125523-9ff063c70017
 )
 
 require (
