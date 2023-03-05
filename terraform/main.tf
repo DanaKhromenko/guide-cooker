@@ -30,11 +30,11 @@ resource "aws_dynamodb_table" "guide_cells_dynamodb_table" {
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
   tags             = local.tags
-  hash_key         = "StationId"
+  hash_key         = "ChannelId"
   range_key        = "EndTime"
 
   attribute {
-    name = "StationId"
+    name = "ChannelId"
     type = "S"
   }
 
@@ -61,11 +61,11 @@ resource "aws_dynamodb_table" "deleted_guide_cells_dynamodb_table" {
   name         = "${local.namespace}-deleted-guide-cells"
   billing_mode = "PAY_PER_REQUEST"
   tags         = local.tags
-  hash_key     = "StationId"
+  hash_key     = "ChannelId"
   range_key    = "EndTime"
 
   attribute {
-    name = "StationId"
+    name = "ChannelId"
     type = "S"
   }
 

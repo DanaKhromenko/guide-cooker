@@ -23,7 +23,7 @@ variable "kafka_endpoint" {
 }
 
 variable "guide_cells_kafka_topic" {
-  description = "Name of Kafka topic with CookerGuideCell objects."
+  description = "Name of Kafka topic with GuideCell objects."
 }
 
 variable "vpc_subnets" {
