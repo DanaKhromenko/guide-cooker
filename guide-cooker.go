@@ -383,8 +383,8 @@ func handleKafkaEvent(kafkaEvent *events.KafkaEvent) error {
 					statusCount := statusCountMap[processingResult.Status]
 					atomic.AddInt32(statusCount, 1)
 
-					// All Kafka messages associated with a station must be process sequentially to guarantee data
-					// consistency. This means that processing for a station must be stopped at the 1st error.
+					// All Kafka messages associated with a channel must be process sequentially to guarantee data
+					// consistency. This means that processing for a channel must be stopped at the 1st error.
 					if processingResult.Status == FAILED {
 						break
 					}
