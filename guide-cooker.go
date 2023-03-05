@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -253,6 +254,21 @@ func handleKafkaEvent(kafkaEvent *events.KafkaEvent) error {
 		}()
 	}
 
+	// Waiting for all routines to finish.
+	wg.Wait()
+
+	if *statusCountMap[FAILED] > 0 {
+		/**
+		 * When an AWS Lambda instance returns an error, AWS Kafka is supposed to resend all records from the current
+		 * batch for reprocessing. And this behavior is supposed to be repeated until the AWS Lambda instance exits
+		 * without error.
+		 *
+		 * We intentionally do not interrupt batch processing immediately after receiving the first error.
+		 * When working with the same batch again, already processed records will fall into the "skipped" category.
+		 * This would affect overall statistics of the number of processed messages but it should be acceptable.
+		 */
+		return errors.New("At least one error occurred during processing!")
+	}
 	return nil
 }
 
