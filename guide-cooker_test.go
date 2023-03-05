@@ -22,7 +22,7 @@ const (
 // Note: declared as variables because it is impossible to get a pointer to a constant.
 var gCurrentUnixTime int64 = time.Now().Unix()
 var gEmptyInt64 int64 = -1
-var gStationId string = "station.1"
+var gChannelId string = "ch.100"
 
 type TestSuite struct {
 	suite.Suite
@@ -51,9 +51,9 @@ func addHeaderToHeaderMap(headers *[]map[string][]byte, key string, value interf
 	*headers = append(*headers, map[string][]byte{key: byteValue})
 }
 
-func createKafkaRecord(offerId, cookerGuideCell string, stationId *string, startTime, endTime *int64, offset int64) *events.KafkaRecord {
+func createKafkaRecord(showId, guideCell string, channelId *string, startTime, endTime *int64, offset int64) *events.KafkaRecord {
 	headers := []map[string][]byte{}
-	addHeaderToHeaderMap(&headers, "StationId", stationId)
+	addHeaderToHeaderMap(&headers, "ChannelId", channelId)
 	addHeaderToHeaderMap(&headers, "StartTime", startTime)
 	addHeaderToHeaderMap(&headers, "EndTime", endTime)
 
@@ -61,8 +61,8 @@ func createKafkaRecord(offerId, cookerGuideCell string, stationId *string, start
 		Headers: headers,
 	}
 
-	kafkaRecord.Key = offerId
-	kafkaRecord.Value = cookerGuideCell
+	kafkaRecord.Key = showId
+	kafkaRecord.Value = guideCell
 	kafkaRecord.Offset = offset
 	kafkaRecord.Topic = TOPIC
 	kafkaRecord.Partition = PARTITION
@@ -72,7 +72,7 @@ func createKafkaRecord(offerId, cookerGuideCell string, stationId *string, start
 
 func (s *TestSuite) TestHandleKafkaEvent() {
 	var headersAndRecords = map[string]*events.KafkaRecord{
-		"Key": createKafkaRecord(RECORD_KEY, RECORD_VALUE, &gStationId, &gCurrentUnixTime, &gCurrentUnixTime, OFFSET),
+		"Key": createKafkaRecord(RECORD_KEY, RECORD_VALUE, &gChannelId, &gCurrentUnixTime, &gCurrentUnixTime, OFFSET),
 	}
 
 	for testName, kafkaRecord := range headersAndRecords {
